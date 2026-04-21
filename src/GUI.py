@@ -1,6 +1,9 @@
 import tkinter as tk
+import logging
 from src import storage
-from tkinter import filedialog
+from src.table_manager import TableManager
+from tkinter import filedialog, messagebox
+from src.table_view import TableView
 from winrt.windows.ui.viewmanagement import UISettings, UIColorType
 
 class GUI(tk.Tk):
@@ -10,9 +13,9 @@ class GUI(tk.Tk):
         self.title('Analysis of EMG signals')
         self.iconbitmap("./data/program.ico")
         self.geometry("900x700")
-        self.minsize(900, 700)
+        self.minsize(1200, 700)
+        self.filename = None
         self._get_windows_theme_info()
-        self.filename = storage.file["filename"]
 
         self._workspace()
 
@@ -27,6 +30,7 @@ class GUI(tk.Tk):
         left.pack(side="left", fill="y", padx=(8, 4), pady=8)
         left.pack_propagate(False)
 
+        # Params of buttons style
         button_style = dict(
             bg=self.accent, fg="white",
             activebackground=self.accent_light, activeforeground="white",
@@ -37,8 +41,8 @@ class GUI(tk.Tk):
         tk.Button(left, text="Show graphic", **button_style).pack(
             fill="x", pady=(0, 6))
 
-        tk.Button(left, text="Show table", **button_style).pack(
-            fill="x", pady=(0, 6))
+        tk.Button(left, text="Show table",
+                  command=self._open_table, **button_style).pack(fill="x", pady=(0, 6))
 
         # Space between button
         tk.Frame(left, bg=self.background_color).pack(fill="both", expand=True)
@@ -60,23 +64,63 @@ class GUI(tk.Tk):
 
         self.placeholder = tk.Label(
             self.workspace,
-            text="Current empty workspace, please select function",
+            text="Choose file, witch you want to read",
             bg=self.workspace_color, fg=self.text,
             font=("Helvetica", 14), justify="center"
         )
         self.placeholder.place(relx=0.5, rely=0.5, anchor="center")
 
+    # Pop-up menu with choose file and save user choose
     def _open_file(self):
-        path = filedialog.askopenfilename(
-            filetypes=[("CSV file", "*.csv")])
+        """
+        At first open file manager with choose only CSV type of files.
+        Alter, start work table manager witch check file for supporting their.
+        In the end, user get notification about his file
+        """
 
-        if path:
+        path = filedialog.askopenfilename(filetypes=[("CSV file", "*.csv")])
+        if not path:
+            return
+
+        logging.info(f"Try change direction to {path}. Start check user's table")
+
+        try:
+            tm = TableManager(path)
+        except (ValueError, FileNotFoundError) as e:
+            logging.error(f"Failed to load file '{path}': {e}")
+            messagebox.showerror(title="Error opening file", message=f"Could not read the file:\n\n{e}")
+            return
+
+        if tm.check_table():
+            messagebox.showinfo(
+                title="Success",
+                message=f"File {path} was successfully opened!\n{tm.info()}"
+            )
             storage.update(path)
             self.filename = storage.file["filename"]
             self.file_label.config(text=f"Current file: {self.filename}")
+            self.tm = tm
+        else:
+            messagebox.showerror(title="Unsupported data", message="Your data format is unsupported.")
 
-    # Change data in workspace
-    def _rebuild(self):
+    # Open table with navigation buttons
+    def _open_table(self):
+        if not hasattr(self, "tm"):
+            messagebox.showwarning(title="No file", message="Please open a CSV file first.")
+            return
+
+        # clear workspace for change page
+        for widget in self.workspace.winfo_children():
+            widget.destroy()
+
+        # Show tables
+        TableView(
+            self.workspace,
+            df=self.tm.df
+        ).pack(fill="both", expand=True)
+
+    # Show graphic at workspace with navigation buttons
+    def _open_graphic(self):
         ...
 
     # Get systems theme colors for app style
@@ -95,17 +139,17 @@ class GUI(tk.Tk):
         self.accent: str = to_hex(settings.get_color_value(UIColorType.ACCENT))
         self.accent_light: str = to_hex(settings.get_color_value(UIColorType.ACCENT_LIGHT1))
         self.accent_dark: str = to_hex(settings.get_color_value(UIColorType.ACCENT_DARK1))
-        self.background_color = "white"
-        self.workspace_color = "white"
-        self.text = "555"
+        self.background_color = "#FFFFFF"
+        self.workspace_color = "#FFFFFF"
+        self.text = "#55555"
 
-        # If turn on dark mode, bg is over black, if this true, change for different dark color
+        # If turn on dark mode, bg is black, if this true, change for different dark color
         if to_hex(settings.get_color_value(UIColorType.BACKGROUND)) == "#000000":
             self.background_color = "#2B2D30"
             self.workspace_color = "#1E1E1E"
-            self.text = "white"
+            self.text = "#FFFFFF"
 
-
-    # Request handler for change data in workspace
-    def edit_workspace(self):
-        pass
+        storage.set_theme(
+            self.accent, self.accent_light, self.accent_dark,
+            self.workspace_color, self.text, self.background_color
+        )
