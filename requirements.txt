@@ -1,0 +1,11 @@
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+seaborn
+streamlit
+joblib
+
+winrt-Windows.UI
+winrt-Windows.UI.ViewManagement
