@@ -2,3 +2,6 @@ winrt-Windows.UI
 winrt-Windows.UI.ViewManagement
 pandas
 matplotlib
+numpy
+scipy
+pyinstaller

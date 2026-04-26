@@ -22,9 +22,9 @@ class TableView(tk.Frame):
 
         super().__init__(parent, bg=self.bg, **kwargs)
 
-        self.df           = df
+        self.df = df
         self.current_page = 0
-        self.page_size    = tk.IntVar(value=self.PAGE_SIZES[0])
+        self.page_size = tk.IntVar(value=self.PAGE_SIZES[0])
 
         self._build()
         self._render_page()

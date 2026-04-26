@@ -35,6 +35,7 @@ class TableManager:
         Validate that the loaded DataFrame matches the expected schema.
         Returns True if the table is valid, False otherwise.
         """
+
         missing = [col for col in self.TABLE_FORMAT if col not in self.df.columns]
         if missing:
             logging.warning(f"[check_table] Missing columns: {missing}")
@@ -64,6 +65,7 @@ class TableManager:
 
     def info(self) -> str:
         """Return a human-readable summary of the table"""
+
         rows = len(self.df)
         cols = len(self.df.columns)
         elements = self.df.size
@@ -72,10 +74,10 @@ class TableManager:
         labels = sorted(self.df["label"].unique().tolist()) if "label" in self.df.columns else []
 
         return (
-            f"Rows:     {rows}\n"
-            f"Columns:  {cols}\n"
+            f"Rows: {rows}\n"
+            f"Columns: {cols}\n"
             f"Elements: {elements}\n"
             f"Channels: {len(channels)}\n"
-            f"Classes:  {classes}\n"
-            f"Labels:   {labels}"
+            f"Classes: {classes}\n"
+            f"Labels: {labels}"
         )

@@ -1,7 +1,6 @@
 import tkinter as tk
 import logging
 from tkinter import messagebox
-
 from src.logger import setup_logger
 from src.GUI import GUI
 

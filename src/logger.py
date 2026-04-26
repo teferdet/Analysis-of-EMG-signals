@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 def setup_logger():
-    app_name = "AoEMGS"
+    app_name = "Analysis of EMG signals"
 
     local_app_data: str = os.getenv('LOCALAPPDATA')
 
