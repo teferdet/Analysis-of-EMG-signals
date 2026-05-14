@@ -42,6 +42,13 @@ class AnalysisSignal:
 
     LOAD_LABELS = {0: "None", 1: "Low", 2: "Medium", 3: "High"}
 
+    # Activity detection: RMS above this threshold (V) is considered active
+    # Based on typical MYO bracelet noise floor ~1–5 µV; 8 µV is a safe margin.
+    ACTIVITY_THRESHOLD: float = 8e-6   # 8 µV
+
+    # Noise floor estimate assumed when no reference is available (V)
+    NOISE_FLOOR_ASSUMED: float = 2e-6  # 2 µV
+
     def __init__(self, row: pd.Series):
         """
         Parameters
@@ -56,10 +63,12 @@ class AnalysisSignal:
         self.series   = int(row["label"])
         self.signals  = np.array([float(row[c]) for c in self.CHANNEL_COLS])
 
-        # Derived fields
+        # Derived fields — computed once and cached
         self._gesture  = self.GESTURE_MAP.get(self.class_id, self.GESTURE_MAP[0])
         self._rms      = self._compute_rms()
+        self._snr_db   = self._compute_snr_db()
         self._dominant = self._dominant_channels()
+        self._activity = self._detect_activity()
 
     # ------------------------------------------------------------------ #
     #  Public properties                                                   #
@@ -71,7 +80,7 @@ class AnalysisSignal:
 
     @property
     def is_active(self) -> bool:
-        """True if the hand is performing an active gesture."""
+        """True if the hand is performing an active gesture (from class label)."""
         return self._gesture[1]
 
     @property
@@ -84,7 +93,7 @@ class AnalysisSignal:
 
     @property
     def load_index(self) -> int:
-        """Raw load index 0-3."""
+        """Raw load index 0–3."""
         return self._gesture[2]
 
     @property
@@ -94,22 +103,89 @@ class AnalysisSignal:
 
     @property
     def rms(self) -> float:
-        """Root Mean Square amplitude across all 8 channels."""
+        """Root Mean Square amplitude across all 8 channels (V)."""
         return self._rms
 
     @property
+    def snr_db(self) -> float:
+        """
+        Estimated Signal-to-Noise Ratio in dB.
+
+        Uses NOISE_FLOOR_ASSUMED as the noise reference when the row RMS
+        is larger than the noise floor; clamps to 0 dB when below.
+        """
+        return self._snr_db
+
+    @property
     def dominant_channels(self) -> list[int]:
-        """1-based indices of the two most active channels."""
+        """1-based indices of the two most active channels (by absolute amplitude)."""
         return self._dominant
 
     @property
+    def peak_channel(self) -> int:
+        """1-based index of the single channel with the highest absolute amplitude."""
+        return int(np.argmax(np.abs(self.signals)) + 1)
+
+    @property
+    def activity_detected(self) -> bool:
+        """
+        True when the measured RMS exceeds the ACTIVITY_THRESHOLD (8 µV).
+
+        This is a *signal-level* check independent of the class label.
+        It is useful for detecting mis-labelled rows or detecting unexpected
+        muscle activation during labelled rest periods.
+        """
+        return self._activity
+
+    @property
+    def activity_label(self) -> str:
+        """Human-readable activity detection result."""
+        return "Detected" if self._activity else "Not detected"
+
+    @property
+    def activity_mismatch(self) -> bool:
+        """
+        True when the class label says Active but no signal activity was detected,
+        or the label says Passive but signal activity was detected.
+
+        Useful for data quality checks.
+        """
+        return self.is_active != self._activity
+
+    @property
+    def channel_balance(self) -> float:
+        """
+        Coefficient of Variation (σ/µ) of absolute channel amplitudes (0–∞).
+
+        A low value means all channels contribute equally; a high value indicates
+        that only a few channels dominate (typical for localised muscle activation).
+        """
+        abs_vals = np.abs(self.signals)
+        mean = abs_vals.mean()
+        if mean == 0:
+            return 0.0
+        return float(abs_vals.std() / mean)
+
+    @property
     def signal_quality(self) -> str:
-        """Qualitative signal quality based on RMS magnitude."""
+        """
+        Qualitative signal quality based on both RMS magnitude and estimated SNR.
+
+        Levels
+        ------
+        No signal : RMS == 0 exactly
+        Noise     : activity not detected (RMS < threshold)
+        Weak      : activity detected, SNR < 6 dB
+        Normal    : SNR 6–20 dB
+        Strong    : SNR > 20 dB
+        """
         if self._rms == 0:
             return "No signal"
-        if self._rms < 1e-5:
+        if not self._activity:
+            return "Noise"
+        if self._snr_db < 6:
             return "Weak"
-        if self._rms < 5e-5:
+        if self._snr_db < 20:
             return "Normal"
         return "Strong"
 
@@ -135,26 +211,35 @@ class AnalysisSignal:
             f"    channel{i+1}: {v:+.3e}"
             for i, v in enumerate(self.signals)
         )
+        mismatch_note = (
+            "  ⚠  Activity mismatch (label vs signal)\n"
+            if self.activity_mismatch else ""
+        )
 
         return (
-            f"{'─' * 44}\n"
+            f"{'─' * 48}\n"
             f"  EMG Signal Analysis  |  Time: {self.time} ms\n"
-            f"{'─' * 44}\n"
+            f"{'─' * 48}\n"
             f"  Gesture          : {self.gesture_name}\n"
             f"  Status           : {self.status}\n"
             f"  Load level       : {self.load_level}\n"
             f"  Body part        : {self.body_part}\n"
             f"  Recording series : {self.series_label}\n"
-            f"{'─' * 44}\n"
+            f"{'─' * 48}\n"
             f"  RMS amplitude    : {self._rms:.3e} V\n"
+            f"  SNR (estimated)  : {self._snr_db:+.1f} dB\n"
             f"  Signal quality   : {self.signal_quality}\n"
+            f"  Activity detected: {self.activity_label}\n"
+            f"  Channel balance  : {self.channel_balance:.2f} (CV)\n"
+            f"  Peak channel     : ch{self.peak_channel}\n"
             f"  Dominant channels: {dominant_str}\n"
-            f"{'─' * 44}\n"
+            f"{mismatch_note}"
+            f"{'─' * 48}\n"
             f"  Channel values:\n"
             f"{channel_lines}\n"
-            f"{'─' * 44}\n"
+            f"{'─' * 48}\n"
             f"  Description: {self._gesture[3]}\n"
-            f"{'─' * 44}"
+            f"{'─' * 48}"
         )
 
     def to_dict(self) -> dict:
@@ -172,7 +257,12 @@ class AnalysisSignal:
             "body_part": self.body_part,
             "series": self.series_label,
             "rms": round(self._rms, 10),
+            "snr_db": round(self._snr_db, 2),
             "signal_quality": self.signal_quality,
+            "activity_detected": self.activity_detected,
+            "activity_mismatch": self.activity_mismatch,
+            "peak_channel": self.peak_channel,
+            "channel_balance": round(self.channel_balance, 4),
             "dominant_channels": self.dominant_channels,
             "channels": {
                 f"channel{i+1}": float(v)
@@ -187,25 +277,31 @@ class AnalysisSignal:
         Returns
         -------
         dict with keys:
-            labels      - list of channel names ['channel1', ..., 'channel8']
-            values      - raw signed amplitudes (float list)
-            abs_values  - absolute amplitudes for bar chart y-axis
-            rms         - scalar RMS value
-            gesture     - gesture name string
-            is_active   - bool
-            load_index  - int 0-3
-            class_id    - raw class integer
+            labels           - list of channel names ['channel1', ..., 'channel8']
+            values           - raw signed amplitudes (float list)
+            abs_values       - absolute amplitudes for bar chart y-axis
+            rms              - scalar RMS value
+            snr_db           - estimated SNR in dB
+            gesture          - gesture name string
+            is_active        - bool (from class label)
+            activity_detected- bool (from signal level)
+            load_index       - int 0-3
+            class_id         - raw class integer
+            peak_channel     - 1-based int
         """
         abs_vals = np.abs(self.signals).tolist()
         return {
-            "labels": self.CHANNEL_COLS,
-            "values": self.signals.tolist(),
-            "abs_values": abs_vals,
-            "rms": self._rms,
-            "gesture": self.gesture_name,
-            "is_active": self.is_active,
-            "load_index": self.load_index,
-            "class_id": self.class_id,
+            "labels":            self.CHANNEL_COLS,
+            "values":            self.signals.tolist(),
+            "abs_values":        abs_vals,
+            "rms":               self._rms,
+            "snr_db":            self._snr_db,
+            "gesture":           self.gesture_name,
+            "is_active":         self.is_active,
+            "activity_detected": self.activity_detected,
+            "load_index":        self.load_index,
+            "class_id":          self.class_id,
+            "peak_channel":      self.peak_channel,
         }
 
     # ------------------------------------------------------------------ #
@@ -216,7 +312,8 @@ class AnalysisSignal:
     def summarize_dataset(df: pd.DataFrame) -> str:
         """
         Return a statistical summary of the full dataset.
-        Shows gesture distribution, active/passive ratio, and per-channel RMS.
+        Shows gesture distribution, active/passive ratio, per-channel RMS,
+        and estimated percentage of activity-mismatch rows.
 
         Parameters
         ----------
@@ -228,11 +325,12 @@ class AnalysisSignal:
         """
         total       = len(df)
         gesture_map = AnalysisSignal.GESTURE_MAP
+        ch_cols     = AnalysisSignal.CHANNEL_COLS
 
         lines = [
-            f"{'=' * 52}",
+            f"{'=' * 56}",
             f"  Dataset Summary  ({total} rows)",
-            f"{'=' * 52}",
+            f"{'=' * 56}",
             "  Gesture distribution:",
         ]
 
@@ -245,26 +343,72 @@ class AnalysisSignal:
 
         # Active / passive split
         active_ids = [k for k, v in gesture_map.items() if v[1]]
-        n_active = df[df["class"].isin(active_ids)].shape[0]
-        n_passive = total - n_active
+        n_active   = df[df["class"].isin(active_ids)].shape[0]
+        n_passive  = total - n_active
+
+        # Signal-level activity detection across full dataset
+        rms_per_row = np.sqrt(
+            (df[ch_cols].values ** 2).mean(axis=1)
+        )
+        n_signal_active = int((rms_per_row >= AnalysisSignal.ACTIVITY_THRESHOLD).sum())
+        n_mismatch = int(((rms_per_row >= AnalysisSignal.ACTIVITY_THRESHOLD)
+                          != df["class"].isin(active_ids).values).sum())
+
         lines += [
-            f"{'─' * 52}",
-            f"  Active samples  : {n_active:>8} ({n_active / total * 100:.1f}%)",
-            f"  Passive samples : {n_passive:>8} ({n_passive / total * 100:.1f}%)",
-            f"{'─' * 52}",
+            f"{'─' * 56}",
+            f"  Active samples   (label)  : {n_active:>8} ({n_active / total * 100:.1f}%)",
+            f"  Passive samples  (label)  : {n_passive:>8} ({n_passive / total * 100:.1f}%)",
+            f"  Active samples   (signal) : {n_signal_active:>8} ({n_signal_active / total * 100:.1f}%)",
+            f"  Label/signal mismatches   : {n_mismatch:>8} ({n_mismatch / total * 100:.1f}%)",
+            f"{'─' * 56}",
             "  Per-channel RMS (mean across dataset):",
         ]
 
-        for ch in AnalysisSignal.CHANNEL_COLS:
+        for ch in ch_cols:
             rms_val = np.sqrt((df[ch] ** 2).mean())
             lines.append(f"    {ch}: {rms_val:.3e} V")
 
-        lines.append(f"{'=' * 52}")
+        # Channel with highest mean RMS (most active on average)
+        rms_vals = np.array([np.sqrt((df[ch] ** 2).mean()) for ch in ch_cols])
+        dominant_ch = ch_cols[int(np.argmax(rms_vals))]
+
+        lines += [
+            f"{'─' * 56}",
+            f"  Most active channel (mean RMS): {dominant_ch}",
+            f"{'=' * 56}",
+        ]
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------ #
+    #  Private helpers                                                     #
+    # ------------------------------------------------------------------ #
 
     def _compute_rms(self) -> float:
         """Compute Root Mean Square of all 8 channel values."""
         return float(np.sqrt(np.mean(self.signals ** 2)))
+
+    def _compute_snr_db(self) -> float:
+        """
+        Estimate SNR in dB.
+
+        SNR = 20 * log10(RMS_signal / noise_floor)
+
+        The noise floor is NOISE_FLOOR_ASSUMED (2 µV) — a conservative
+        estimate for the MYO bracelet's typical electronic noise.
+        Clamped to 0 dB when signal is at or below the noise level.
+        """
+        if self._rms <= self.NOISE_FLOOR_ASSUMED:
+            return 0.0
+        return float(20 * np.log10(self._rms / self.NOISE_FLOOR_ASSUMED))
+
+    def _detect_activity(self) -> bool:
+        """
+        Returns True when RMS exceeds ACTIVITY_THRESHOLD (8 µV).
+
+        Muscle activity in MYO bracelet data is reliably above ~5–10 µV.
+        Rows below this are treated as electronic noise / rest artefacts.
+        """
+        return self._rms >= self.ACTIVITY_THRESHOLD
 
     def _dominant_channels(self) -> list[int]:
         """Return 1-based indices of the 2 channels with the highest absolute amplitude."""

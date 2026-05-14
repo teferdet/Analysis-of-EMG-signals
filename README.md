@@ -28,12 +28,15 @@ The application was originally developed around the [EMG Signal for Gesture Reco
 
 ### 📂 File Management
 - Open any `.csv` file via a native file dialog
+- **Drag & drop** — drop a `.csv` file directly onto the window to open it instantly
 - Automatic schema validation — the app checks column names, data types, and null values before loading
 - Human-readable file summary shown on successful load (row count, column count, unique classes and labels)
 
 ### 📊 Table View
 - Paginated display of the full dataset using a native `Treeview` widget
 - Configurable page sizes (30 / 45 / 60 rows per page)
+- **Direct page navigation** — type a page number and press Enter to jump to it
+- **Sortable columns** — click any column header to sort ascending/descending (▲/▼)
 - Horizontal and vertical scrollbars
 - Themed column headers matching the Windows accent color
 
@@ -45,6 +48,13 @@ The application was originally developed around the [EMG Signal for Gesture Reco
   3. Full-wave rectified
   4. Linear envelope (moving-average smoothed)
 - Channel selector to isolate individual channels
+- **Chart interaction:**
+  - 🖱 **Left-drag** — draw a rectangle to zoom into the selected area
+  - 🖱 **Scroll** — zoom X-axis anchored to the cursor position
+  - 🖱 **Ctrl + Scroll** — zoom Y-axis anchored to the cursor position
+  - 🖱 **Middle-click** — reset zoom to full view
+- Minimal navigation toolbar showing only cursor coordinates (X/Y)
+- **Result caching** — processing pipeline is not re-run when switching tabs if parameters haven't changed
 
 ### 🔬 Signal View — Single Row Tab
 - Bar chart showing absolute channel amplitudes for any selected sample
@@ -58,6 +68,8 @@ The application was originally developed around the [EMG Signal for Gesture Reco
   - Signal quality (No signal / Weak / Normal / Strong)
   - Top 2 dominant channels
 - Row navigation with Previous / Next buttons and a direct index input
+- **Chart interaction:** same zoom/pan controls as the Overview tab
+- **↺ Reset zoom** button to restore the default view
 
 ### 🎨 Windows Theme Integration
 - Reads the system accent color via the **WinRT** API at startup
@@ -91,6 +103,7 @@ The application was originally developed around the [EMG Signal for Gesture Reco
 | Library | Purpose |
 |---|---|
 | `tkinter` / `ttk` | Main GUI framework — windows, widgets, layout |
+| `tkinterdnd2` | Native drag-and-drop file support for Tkinter on Windows |
 | `matplotlib` | Signal charts and bar plots embedded in Tkinter |
 | `pandas` | CSV loading, DataFrame management, schema validation |
 | `numpy` | Signal processing arithmetic, RMS computation |
@@ -117,9 +130,9 @@ Analysis-of-EMG-signals/
 │   ├── single_rows.png
 │   └── colorful_supports.png
 └── src/
-    ├── GUI.py                  # Main window, layout, file dialog, view routing
-    ├── signal_view.py          # Signal chart widget (Overview + Single tab)
-    ├── table_view.py           # Paginated table widget
+    ├── GUI.py                  # Main window, layout, file dialog, drag-and-drop, view routing
+    ├── signal_view.py          # Signal chart widget (Overview + Single tab), zoom/pan logic
+    ├── table_view.py           # Paginated table widget with sorting and page navigation
     ├── analysis_signal.py      # Per-sample EMG analysis engine
     ├── table_manager.py        # CSV loading and schema validation
     ├── storage.py              # Global state — file info and theme cache
@@ -142,10 +155,19 @@ Analysis-of-EMG-signals/
 git clone https://github.com/teferdet/Analysis-of-EMG-signals.git
 cd Analysis-of-EMG-signals
 
-# 2. Install dependencies
+# 2. Create a Python virtual environment
+python -m venv .venv
+
+# 3. Activate the virtual environment
+# PowerShell:
+.venv\Scripts\Activate.ps1
+# Command Prompt:
+.venv\Scripts\activate.bat
+
+# 4. Install dependencies
 pip install -r requirements.txt
 
-# 3. Run the application
+# 5. Run the application
 python main.py
 ```
 
@@ -156,6 +178,7 @@ python build.py
 ```
 
 The output will be placed in the `dist/` folder as a self-contained directory.
+If you build this project you ALSO need to create venv!
 
 ---
 
@@ -169,6 +192,8 @@ The application expects a CSV file with **exactly** the following 11 columns:
 | `channel1` – `channel8` | float | Raw EMG amplitude for each of the 8 MYO bracelet sensors |
 | `class` | integer | Gesture label (0–7, see table below) |
 | `label` | integer | Recording series number (1 or 2) |
+
+> ⚠️ **Only `.csv` files are supported.** Other formats (Excel, JSON, Parquet, etc.) will be rejected.
 
 **Source dataset:** [EMG Signal for Gesture Recognition — Kaggle / Sojanprajapati](https://www.kaggle.com/datasets/sojanprajapati/emg-signal-for-gesture-recognition)
 

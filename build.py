@@ -24,3 +24,4 @@ def build_project():
 
 if __name__ == "__main__":
     build_project()
+    input()

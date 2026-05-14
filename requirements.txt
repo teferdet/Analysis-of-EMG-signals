@@ -4,4 +4,5 @@ pandas
 matplotlib
 numpy
 scipy
+tkinterdnd2
 pyinstaller

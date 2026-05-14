@@ -64,20 +64,45 @@ class TableManager:
         return True
 
     def info(self) -> str:
-        """Return a human-readable summary of the table"""
-
-        rows = len(self.df)
-        cols = len(self.df.columns)
-        elements = self.df.size
-        channels = [c for c in self.df.columns if c.startswith("channel")]
-        classes = sorted(self.df["class"].unique().tolist()) if "class" in self.df.columns else []
-        labels = sorted(self.df["label"].unique().tolist()) if "label" in self.df.columns else []
-
+        """Return a human-readable summary of the table (single-line per stat)."""
+        d = self.info_dict()
         return (
-            f"Rows: {rows}\n"
-            f"Columns: {cols}\n"
-            f"Elements: {elements}\n"
-            f"Channels: {len(channels)}\n"
-            f"Classes: {classes}\n"
-            f"Labels: {labels}"
+            f"Rows: {d['rows']:,}  \u00b7  "
+            f"Columns: {d['cols']}  \u00b7  "
+            f"Channels: {d['channels']}\n"
+            f"Classes: {d['classes_str']}  \u00b7  "
+            f"Labels: {d['labels_str']}"
         )
+
+    def info_dict(self) -> dict:
+        """Return structured metadata about the loaded DataFrame."""
+        rows     = len(self.df)
+        cols     = len(self.df.columns)
+        channels = [c for c in self.df.columns if c.startswith("channel")]
+        classes  = sorted(self.df["class"].unique().tolist())  if "class"  in self.df.columns else []
+        labels   = sorted(self.df["label"].unique().tolist())  if "label"  in self.df.columns else []
+
+        return {
+            "rows":         rows,
+            "cols":         cols,
+            "elements":     self.df.size,
+            "channels":     len(channels),
+            "classes":      classes,
+            "labels":       labels,
+            "classes_str":  self._compress(classes),
+            "labels_str":   self._compress(labels),
+        }
+
+    @staticmethod
+    def _compress(lst: list) -> str:
+        """
+        Format a sorted list compactly:
+          [1, 2, 3]           → [1, 2, 3]   (short, show all)
+          [1, 2, ..., 36]     → [1...36]    (long, show range)
+        Threshold: more than 6 elements switches to range format.
+        """
+        if not lst:
+            return "[]"
+        if len(lst) <= 6:
+            return str(lst)
+        return f"[{lst[0]}...{lst[-1]}]"
